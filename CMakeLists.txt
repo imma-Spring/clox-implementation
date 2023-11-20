@@ -16,4 +16,6 @@ add_executable(
   src/main.c
   src/memory.c
   src/chunks.c
+  src/debug.c
+  src/value.c
 )
