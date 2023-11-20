@@ -15,5 +15,5 @@ add_executable(
   clox
   src/main.c
   src/memory.c
-  scr/chunks.c
+  src/chunks.c
 )
