@@ -3,6 +3,7 @@
 #include "value.h"
 
 typedef enum Op_Code{
+  OP_CONSTANT,
   OP_RETURN,
 } Op_Code;
 
@@ -16,3 +17,4 @@ typedef struct Chunk {
 void init_chunk(Chunk *chunk);
 void write_chunk(Chunk *chunk, uint8_t byte);
 void free_chunk(Chunk *chunk);
+size_t add_constant(Chunk *chunk, Value value);
