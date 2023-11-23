@@ -18,4 +18,5 @@ add_executable(
   src/chunks.c
   src/debug.c
   src/value.c
+  src/vm.c
 )
