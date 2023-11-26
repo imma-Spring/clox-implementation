@@ -2,6 +2,11 @@
 #include "chunks.h"
 #include "common.h"
 #include "scanner.h"
+
+#ifdef DEBUG_PRINT_CODE
+#include "debug.h"
+#endif /* ifdef DEBUG_PRINT_CODE */
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -111,7 +116,18 @@ static void emit_constant(Value value) {
   emit_bytes(OP_CONSTANT, make_constant(value));
 }
 
-static void end_compiler() { emit_return(); }
+static void end_compiler() {
+  emit_return();
+#ifdef DEBUG_PRINT_CODE
+  if (!parser.had_error) {
+    disassemble_chunk(current_chunk(), "code");
+  }
+
+#endif /* ifdef DEBUG_PRINT_CODE                                               \
+  if (!parser.had_error) {                                                     \
+    disassemble_chunk(current_chunk(), "code");                                \
+  } */
+}
 
 static void expression();
 static ParseRule *get_rule(TokenType type);
