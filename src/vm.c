@@ -35,10 +35,12 @@ static void runtime_error(const char *format, ...) {
 void init_VM() {
   reset_stack();
   vm.objects = NULL;
+  init_table(&vm.globals);
   init_table(&vm.strings);
 }
 
 void free_VM() {
+  free_table(&vm.globals);
   free_table(&vm.strings);
   free_objects();
 }
@@ -74,6 +76,7 @@ static void concatonate() {
 static InterpretResult run() {
 #define READ_BYTE() (*vm.ip++)
 #define READ_CONSTANT() (vm.chunk->constants.value[READ_BYTE()])
+#define READ_STRING() AS_STRING(READ_CONSTANT())
 #define BINARY_OP(value_type, op)                                              \
   do {                                                                         \
     if (!IS_NUMBER(peek(0)) || !IS_NUMBER(peek(1))) {                          \
@@ -107,6 +110,34 @@ static InterpretResult run() {
     case OP_FALSE:
       push(BOOL_VAL(false));
       break;
+    case OP_POP:
+      pop();
+      break;
+    case OP_GET_GLOBAL: {
+      ObjString *name = READ_STRING();
+      Value value;
+      if (!table_get(&vm.globals, name, &value)) {
+        runtime_error("Undefined variable '%s'.", name->chars);
+        return INTERPRET_RUNTIME_ERROR;
+      }
+      push(value);
+      break;
+    }
+    case OP_DEFINE_GLOBAL: {
+      ObjString *name = READ_STRING();
+      table_set(&vm.globals, name, peek(0));
+      pop();
+      break;
+    }
+    case OP_SET_GLOBAL: {
+      ObjString *name = READ_STRING();
+      if (table_set(&vm.globals, name, peek(0))) {
+        table_delete(&vm.globals, name);
+        runtime_error("Undefined variable '%s'.", name->chars);
+        return INTERPRET_RUNTIME_ERROR;
+      }
+      break;
+    }
     case OP_EQUAL: {
       Value b = pop();
       Value a = pop();
@@ -151,9 +182,12 @@ static InterpretResult run() {
       }
       push(NUMBER_VAL(-AS_NUMBER(pop())));
       break;
-    case OP_RETURN: {
+    case OP_PRINT: {
       print_value(pop());
       printf("\n");
+      break;
+    }
+    case OP_RETURN: {
       return INTERPRET_OK;
     }
     case OP_CONSTANT: {
@@ -166,6 +200,7 @@ static InterpretResult run() {
 
 #undef READ_CONSTANT
 #undef READ_BYTE
+#undef READ_STRING
 #undef BINARY_OP
 }
 
