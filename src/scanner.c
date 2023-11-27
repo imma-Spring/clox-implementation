@@ -47,6 +47,7 @@ static bool match(char expected) {
   if (*scanner.current != expected) {
     return false;
   }
+  scanner.current++;
   return true;
 }
 

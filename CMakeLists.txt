@@ -21,4 +21,5 @@ add_executable(
   src/vm.c
   src/compiler.c
   src/scanner.c
+  src/object.c
 )
