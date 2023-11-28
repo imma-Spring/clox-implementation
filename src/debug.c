@@ -16,6 +16,12 @@ static size_t simple_instruction(const char *name, int offset) {
   return offset + 1;
 }
 
+static size_t byte_instruction(const char *name, Chunk *chunk, size_t offset) {
+  uint8_t slot = chunk->code[offset + 1];
+  printf("%-16s %4d\n", name, slot);
+  return offset + 2;
+}
+
 static size_t constant_instruction(const char *name, Chunk *chunk,
                                    size_t offset) {
   uint8_t constant = chunk->code[offset + 1];
@@ -44,6 +50,10 @@ size_t disassemble_instruction(Chunk *chunk, size_t offset) {
     return simple_instruction("OP_FALSE", offset);
   case OP_POP:
     return simple_instruction("OP_POP", offset);
+  case OP_GET_LOCAL:
+    return byte_instruction("OP_GET_LOCAL", chunk, offset);
+  case OP_SET_LOCAL:
+    return byte_instruction("OP_SET_LOCAL", chunk, offset);
   case OP_GET_GLOBAL:
     return constant_instruction("OP_GET_GLOBAL", chunk, offset);
   case OP_DEFINE_GLOBAL:
