@@ -126,6 +126,23 @@ static void emit_bytes(uint8_t byte1, int8_t byte2) {
   emit_byte(byte2);
 }
 
+static void emit_loop(size_t loop_start) {
+  emit_byte(OP_LOOP);
+  size_t offset = current_chunk()->count - loop_start + 2;
+  if (offset > UINT16_MAX) {
+    error("Loop body too large.");
+  }
+  emit_byte((offset >> 8) & 0xff);
+  emit_byte(offset & 0xff);
+}
+
+static size_t emit_jump(uint8_t instruction) {
+  emit_byte(instruction);
+  emit_byte(0xff);
+  emit_byte(0xff);
+  return current_chunk()->count - 2;
+}
+
 static void emit_return() { emit_byte(OP_RETURN); }
 
 static uint8_t make_constant(Value value) {
@@ -140,6 +157,16 @@ static uint8_t make_constant(Value value) {
 
 static void emit_constant(Value value) {
   emit_bytes(OP_CONSTANT, make_constant(value));
+}
+
+static void patch_jump(size_t offset) {
+  size_t jump = current_chunk()->count - offset - 2;
+  if (jump > UINT16_MAX) {
+    error("Too much code to jump over.");
+  }
+
+  current_chunk()->code[offset] = (jump >> 8) & 0xff;
+  current_chunk()->code[offset + 1] = jump & 0xff;
 }
 
 static void init_compiler(Compiler *compiler) {
@@ -232,6 +259,34 @@ static void declare_variable() {
   add_local(*name);
 }
 
+static uint8_t parse_variable(const char *error_message) {
+  consume(TOKEN_IDENTIFIER, error_message);
+  declare_variable();
+  if (current->scope_depth > 0) {
+    return 0;
+  }
+  return identifier_constant(&parser.previous);
+}
+
+static void mark_initialized() {
+  current->locals[current->local_count - 1].depth = current->scope_depth;
+}
+
+static void define_variable(uint8_t global) {
+  if (current->scope_depth > 0) {
+    mark_initialized();
+    return;
+  }
+  emit_bytes(OP_DEFINE_GLOBAL, global);
+}
+
+static void and_(bool can_assign) {
+  size_t end_jump = emit_jump(OP_JUMP_IF_FALSE);
+  emit_byte(OP_POP);
+  parse_precedence(PREC_AND);
+  patch_jump(end_jump);
+}
+
 static void binary(bool can_assign) {
   TokenType operator_type = parser.previous.type;
   ParseRule *rule = get_rule(operator_type);
@@ -298,6 +353,15 @@ static void number(bool can_assign) {
   emit_constant(NUMBER_VAL(value));
 }
 
+static void or_(bool can_assign) {
+  size_t else_jump = emit_jump(OP_JUMP_IF_FALSE);
+  size_t end_jump = emit_jump(OP_JUMP);
+  patch_jump(else_jump);
+  emit_byte(OP_POP);
+  parse_precedence(PREC_OR);
+  patch_jump(end_jump);
+}
+
 static void string(bool can_assign) {
   emit_constant(OBJ_VAL(
       copy_string(parser.previous.start + 1, parser.previous.length - 2)));
@@ -354,7 +418,7 @@ ParseRule rules[] = {
     [TOKEN_SLASH] = {NULL, binary, PREC_FACTOR},
     [TOKEN_STAR] = {NULL, binary, PREC_FACTOR},
     [TOKEN_BANG] = {unary, NULL, PREC_NONE},
-    [TOKEN_BANG_EQUAL] = {NULL, binary, PREC_NONE},
+    [TOKEN_BANG_EQUAL] = {NULL, binary, PREC_EQUALITY},
     [TOKEN_EQUAL] = {NULL, NULL, PREC_NONE},
     [TOKEN_EQUAL_EQUAL] = {NULL, binary, PREC_EQUALITY},
     [TOKEN_GREATER] = {NULL, binary, PREC_COMPARISON},
@@ -364,7 +428,7 @@ ParseRule rules[] = {
     [TOKEN_IDENTIFIER] = {variable, NULL, PREC_NONE},
     [TOKEN_STRING] = {string, NULL, PREC_NONE},
     [TOKEN_NUMBER] = {number, NULL, PREC_NONE},
-    [TOKEN_AND] = {NULL, NULL, PREC_NONE},
+    [TOKEN_AND] = {NULL, and_, PREC_AND},
     [TOKEN_CLASS] = {NULL, NULL, PREC_NONE},
     [TOKEN_ELSE] = {NULL, NULL, PREC_NONE},
     [TOKEN_FALSE] = {literal, NULL, PREC_NONE},
@@ -372,7 +436,7 @@ ParseRule rules[] = {
     [TOKEN_FUN] = {NULL, NULL, PREC_NONE},
     [TOKEN_IF] = {NULL, NULL, PREC_NONE},
     [TOKEN_NIL] = {literal, NULL, PREC_NONE},
-    [TOKEN_OR] = {NULL, NULL, PREC_NONE},
+    [TOKEN_OR] = {NULL, or_, PREC_OR},
     [TOKEN_PRINT] = {NULL, NULL, PREC_NONE},
     [TOKEN_RETURN] = {NULL, NULL, PREC_NONE},
     [TOKEN_SUPER] = {NULL, NULL, PREC_NONE},
@@ -406,27 +470,6 @@ static void parse_precedence(Precedence precedence) {
   }
 }
 
-static uint8_t parse_variable(const char *error_message) {
-  consume(TOKEN_IDENTIFIER, error_message);
-  declare_variable();
-  if (current->scope_depth > 0) {
-    return 0;
-  }
-  return identifier_constant(&parser.previous);
-}
-
-static void mark_initialized() {
-  current->locals[current->local_count - 1].depth = current->scope_depth;
-}
-
-static void define_variable(uint8_t global) {
-  if (current->scope_depth > 0) {
-    mark_initialized();
-    return;
-  }
-  emit_bytes(OP_DEFINE_GLOBAL, global);
-}
-
 static ParseRule *get_rule(TokenType type) { return &rules[type]; }
 
 static void expression() { parse_precedence(PREC_ASSIGNMENT); }
@@ -455,10 +498,75 @@ static void expression_statement() {
   emit_byte(OP_POP);
 }
 
+static void for_statement() {
+  begin_scope();
+  consume(TOKEN_LEFT_PAREN, "Expect '(' after 'for'.");
+  if (match(TOKEN_SEMICOLON)) {
+  } else if (match(TOKEN_VAR)) {
+    var_declaration();
+  } else {
+    expression_statement();
+  }
+  size_t loop_start = current_chunk()->count;
+  ssize_t exit_jump = -1;
+  if (!match(TOKEN_SEMICOLON)) {
+    expression();
+    consume(TOKEN_SEMICOLON, "Expect ';' after loop condition.");
+    exit_jump = emit_jump(OP_JUMP_IF_FALSE);
+    emit_byte(OP_POP);
+  }
+  if (!match(TOKEN_RIGHT_PAREN)) {
+    size_t body_jump = emit_jump(OP_JUMP);
+    size_t increment_start = current_chunk()->count;
+    expression();
+    emit_byte(OP_POP);
+    consume(TOKEN_RIGHT_PAREN, "Expect ')' after for clauses.");
+    emit_loop(loop_start);
+    loop_start = increment_start;
+    patch_jump(body_jump);
+  }
+  statement();
+  emit_loop(loop_start);
+  if (exit_jump != -1) {
+    patch_jump(exit_jump);
+    emit_byte(OP_POP);
+  }
+  end_scope();
+}
+
+static void if_statement() {
+  consume(TOKEN_LEFT_PAREN, "Expect '(' after 'if'.)");
+  expression();
+  consume(TOKEN_RIGHT_PAREN, "Expect ')' after condition.");
+  size_t then_jump = emit_jump(OP_JUMP_IF_FALSE);
+  emit_byte(OP_POP);
+  statement();
+  size_t else_jump = emit_jump(OP_JUMP);
+  patch_jump(then_jump);
+  emit_byte(OP_POP);
+  if (match(TOKEN_ELSE)) {
+    statement();
+  }
+  patch_jump(else_jump);
+}
+
 static void print_statement() {
   expression();
   consume(TOKEN_SEMICOLON, "Expect ';' after value.");
   emit_byte(OP_PRINT);
+}
+
+static void while_statement() {
+  size_t loop_start = current_chunk()->count;
+  consume(TOKEN_LEFT_PAREN, "Expect '(' after 'while'.");
+  expression();
+  consume(TOKEN_RIGHT_PAREN, "Expect ')' after condition.");
+  size_t exit_jump = emit_jump(OP_JUMP_IF_FALSE);
+  emit_byte(OP_POP);
+  statement();
+  emit_loop(loop_start);
+  patch_jump(exit_jump);
+  emit_byte(OP_POP);
 }
 
 static void synchronize() {
@@ -496,10 +604,16 @@ static void declaration() {
 static void statement() {
   if (match(TOKEN_PRINT)) {
     print_statement();
+  } else if (match(TOKEN_FOR)) {
+    for_statement();
+  } else if (match(TOKEN_WHILE)) {
+    while_statement();
   } else if (match(TOKEN_LEFT_BRACE)) {
     begin_scope();
     block();
     end_scope();
+  } else if (match(TOKEN_IF)) {
+    if_statement();
   } else {
     expression_statement();
   }

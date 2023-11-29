@@ -113,7 +113,7 @@ static TokenType identifier_type() {
   case 'c':
     return check_keyword(1, 4, "lass", TOKEN_CLASS);
   case 'e':
-    return check_keyword(1, 3, "lese", TOKEN_ELSE);
+    return check_keyword(1, 3, "lse", TOKEN_ELSE);
   case 'i':
     return check_keyword(1, 1, "f", TOKEN_IF);
   case 'n':
