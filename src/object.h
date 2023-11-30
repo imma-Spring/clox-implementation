@@ -1,17 +1,24 @@
 #pragma once
 
+#include "chunks.h"
 #include "common.h"
 #include "value.h"
 #include <stddef.h>
 
 #define OBJ_TYPE(value) (AS_OBJ(value)->type)
 
+#define IS_FUNCTION(value) is_obj_type(value, OBJ_FUNCTION)
+#define IS_NATIVE(value) is_obj_type(value, OBJ_NATIVE)
 #define IS_STRING(value) is_obj_type(value, OBJ_STRING)
 
+#define AS_FUNCTION(value) ((ObjFunction *)AS_OBJ(value))
+#define AS_NATIVE(value) (((ObjNative *)AS_OBJ(value))->function)
 #define AS_STRING(value) ((ObjString *)AS_OBJ(value))
 #define AS_CSTRING(value) (((ObjString *)AS_OBJ(value))->chars)
 
 typedef enum ObjType {
+  OBJ_FUNCTION,
+  OBJ_NATIVE,
   OBJ_STRING,
 } ObjType;
 
@@ -20,6 +27,20 @@ struct Obj {
   struct Obj *next;
 };
 
+typedef struct ObjFunction {
+  Obj obj;
+  size_t arity;
+  Chunk chunk;
+  ObjString *name;
+} ObjFunction;
+
+typedef Value (*NativeFn)(size_t arg_count, Value *args);
+
+typedef struct ObjNative {
+  Obj obj;
+  NativeFn function;
+} ObjNative;
+
 struct ObjString {
   Obj obj;
   size_t length;
@@ -27,6 +48,8 @@ struct ObjString {
   uint32_t hash;
 };
 
+ObjFunction *new_function();
+ObjNative *new_native(NativeFn function);
 ObjString *take_string(char *chars, size_t length);
 ObjString *copy_string(const char *chars, size_t length);
 void print_object(Value value);
