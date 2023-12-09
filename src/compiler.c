@@ -48,7 +48,13 @@ typedef struct ParseRule {
 typedef struct Local {
   Token name;
   ssize_t depth;
+  bool is_captured;
 } Local;
+
+typedef struct Upvalue {
+  uint8_t index;
+  bool is_local;
+} Upvalue;
 
 typedef enum FunctionType { TYPE_FUNCTION, TYPE_SCRIPT } FunctionType;
 
@@ -59,6 +65,7 @@ typedef struct Compiler {
 
   Local locals[UINT8_COUNT];
   size_t local_count;
+  Upvalue upvalues[UINT8_COUNT];
   size_t scope_depth;
 } Compiler;
 
@@ -193,6 +200,7 @@ static void init_compiler(Compiler *compiler, FunctionType type) {
 
   Local *local = &current->locals[current->local_count++];
   local->depth = 0;
+  local->is_captured = false;
   local->name.start = "";
   local->name.length = 0;
 }
@@ -222,7 +230,11 @@ static void end_scope() {
   while (current->local_count > 0 &&
          current->locals[current->local_count - 1].depth >
              current->scope_depth) {
-    emit_byte(OP_POP);
+    if (current->locals[current->local_count - 1].is_captured) {
+      emit_byte(OP_CLOSE_UPVALUE);
+    } else {
+      emit_byte(OP_POP);
+    }
     current->local_count--;
   }
 }
@@ -257,6 +269,43 @@ static int resolve_local(Compiler *compiler, Token *name) {
   return -1;
 }
 
+static ssize_t add_upvalue(Compiler *compiler, uint8_t index, bool is_local) {
+  ssize_t upvalue_count = compiler->function->upvalue_count;
+  for (size_t i = 0; i < upvalue_count; ++i) {
+    Upvalue *upvalue = &compiler->upvalues[i];
+    if (upvalue->index == index && upvalue->is_local == is_local) {
+      return i;
+    }
+  }
+
+  if (upvalue_count == UINT8_COUNT) {
+    error("Too many closure vairables in function");
+    return 0;
+  }
+  compiler->upvalues[upvalue_count].is_local = is_local;
+  compiler->upvalues[upvalue_count].index = index;
+  return compiler->function->upvalue_count++;
+}
+
+static ssize_t resolve_upvalue(Compiler *compiler, Token *name) {
+  if (compiler->enclosing == NULL) {
+    return -1;
+  }
+
+  ssize_t local = resolve_local(compiler->enclosing, name);
+  if (local != -1) {
+    compiler->enclosing->locals[local].is_captured = true;
+    return add_upvalue(compiler, (uint8_t)local, true);
+  }
+
+  ssize_t upvalue = resolve_upvalue(compiler->enclosing, name);
+  if (upvalue != -1) {
+    return add_upvalue(compiler, (uint8_t)upvalue, false);
+  }
+
+  return -1;
+}
+
 static void add_local(Token name) {
   if (current->local_count == UINT8_COUNT) {
     error("Too many local variables in function.");
@@ -264,8 +313,8 @@ static void add_local(Token name) {
   }
   Local *local = &current->locals[current->local_count++];
   local->name = name;
-  local->depth = current->scope_depth;
   local->depth = -1;
+  local->is_captured = false;
 }
 
 static void declare_variable() {
@@ -423,6 +472,9 @@ static void named_variable(Token name, bool can_assign) {
   if (arg != -1) {
     get_op = OP_GET_LOCAL;
     set_op = OP_SET_LOCAL;
+  } else if ((arg = resolve_upvalue(current, &name)) != -1) {
+    get_op = OP_GET_UPVALUE;
+    set_op = OP_SET_UPVALUE;
   } else {
     arg = identifier_constant(&name);
     get_op = OP_GET_GLOBAL;
@@ -551,7 +603,12 @@ static void function(FunctionType type) {
   consume(TOKEN_LEFT_BRACE, "Expect '{' before function body.");
   block();
   ObjFunction *function = end_compiler();
-  emit_bytes(OP_CONSTANT, make_constant(OBJ_VAL(function)));
+  emit_bytes(OP_CLOSURE, make_constant(OBJ_VAL(function)));
+
+  for (size_t i = 0; i < function->upvalue_count; ++i) {
+    emit_byte(compiler.upvalues[i].is_local ? 1 : 0);
+    emit_byte(compiler.upvalues[i].index);
+  }
 }
 
 static void fun_declaration() {
