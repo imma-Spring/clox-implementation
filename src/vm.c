@@ -107,6 +107,11 @@ static bool call(ObjClosure *closure, size_t arg_count) {
 static bool call_value(Value callee, size_t arg_count) {
   if (IS_OBJ(callee)) {
     switch (OBJ_TYPE(callee)) {
+    case OBJ_CLASS: {
+      ObjClass *class = AS_CLASS(callee);
+      vm.stack_top[-arg_count - 1] = OBJ_VAL(new_instance(class));
+      return true;
+    }
     case OBJ_CLOSURE:
       return call(AS_CLOSURE(callee), arg_count);
     case OBJ_NATIVE: {
@@ -262,6 +267,34 @@ static InterpretResult run() {
       *frame->closure->upvalues[slot]->location = peek(0);
       break;
     }
+    case OP_GET_PROPERTY: {
+      if (!IS_INSTANCE(peek(0))) {
+        runtime_error("Only instances have properties.");
+        return INTERPRET_RUNTIME_ERROR;
+      }
+      ObjInstance *instance = AS_INSTANCE(peek(0));
+      ObjString *name = READ_STRING();
+      Value value;
+      if (table_get(&instance->fields, name, &value)) {
+        pop();
+        push(value);
+        break;
+      }
+      runtime_error("Undefined property '%s'.", name->chars);
+      return INTERPRET_RUNTIME_ERROR;
+    }
+    case OP_SET_PROPERTY: {
+      if (!IS_INSTANCE(peek(1))) {
+        runtime_error("Only instances have fields.");
+        return INTERPRET_RUNTIME_ERROR;
+      }
+      ObjInstance *instance = AS_INSTANCE(peek(1));
+      table_set(&instance->fields, READ_STRING(), peek(0));
+      Value value = pop();
+      pop();
+      push(value);
+      break;
+    }
     case OP_EQUAL: {
       Value b = pop();
       Value a = pop();
@@ -368,6 +401,9 @@ static InterpretResult run() {
       frame = &vm.frames[vm.frame_count - 1];
       break;
     }
+    case OP_CLASS:
+      push(OBJ_VAL(new_class(READ_STRING())));
+      break;
     case OP_CONSTANT: {
       Value constant = READ_CONSTANT();
       push(constant);
