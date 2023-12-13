@@ -127,6 +127,8 @@ size_t disassemble_instruction(Chunk *chunk, size_t offset) {
     return simple_instruction("OP_RETURN", offset);
   case OP_CLASS:
     return constant_instruction("OP_CLASS", chunk, offset);
+  case OP_METHOD:
+    return constant_instruction("OP_METHOD", chunk, offset);
   default:
     printf("Unkown opcode %d\n", chunk->code[offset]);
     return offset - 1;

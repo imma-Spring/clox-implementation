@@ -107,6 +107,10 @@ static bool call(ObjClosure *closure, size_t arg_count) {
 static bool call_value(Value callee, size_t arg_count) {
   if (IS_OBJ(callee)) {
     switch (OBJ_TYPE(callee)) {
+    case OBJ_BOUND_METHOD: {
+      ObjBoundMethod *bound = AS_BOUND_METHOD(callee);
+      return call(bound->method, arg_count);
+    }
     case OBJ_CLASS: {
       ObjClass *class = AS_CLASS(callee);
       vm.stack_top[-arg_count - 1] = OBJ_VAL(new_instance(class));
@@ -127,6 +131,18 @@ static bool call_value(Value callee, size_t arg_count) {
   }
   runtime_error("Can only call functions and classes.");
   return false;
+}
+
+static bool bind_method(ObjClass *class, ObjString *name) {
+  Value method;
+  if (!table_get(&class->methods, name, &method)) {
+    runtime_error("Undefined property '%s'.", name->chars);
+    return false;
+  }
+  ObjBoundMethod *bound = new_bound_method(peek(0), AS_CLOSURE(method));
+  pop();
+  push(OBJ_VAL(bound));
+  return true;
 }
 
 static ObjUpvalue *capture_upvalue(Value *local) {
@@ -156,6 +172,13 @@ static void close_upvalue(Value *last) {
     upvalue->location = &upvalue->closed;
     vm.open_upvalues = upvalue->next;
   }
+}
+
+static void define_method(ObjString *name) {
+  Value method = peek(0);
+  ObjClass *class = AS_CLASS(peek(1));
+  table_set(&class->methods, name, method);
+  pop();
 }
 
 static bool is_falsey(Value value) {
@@ -280,8 +303,10 @@ static InterpretResult run() {
         push(value);
         break;
       }
-      runtime_error("Undefined property '%s'.", name->chars);
-      return INTERPRET_RUNTIME_ERROR;
+      if (!bind_method(instance->klass, name)) {
+        return INTERPRET_RUNTIME_ERROR;
+      }
+      break;
     }
     case OP_SET_PROPERTY: {
       if (!IS_INSTANCE(peek(1))) {
@@ -403,6 +428,9 @@ static InterpretResult run() {
     }
     case OP_CLASS:
       push(OBJ_VAL(new_class(READ_STRING())));
+      break;
+    case OP_METHOD:
+      define_method(READ_STRING());
       break;
     case OP_CONSTANT: {
       Value constant = READ_CONSTANT();

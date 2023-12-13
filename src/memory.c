@@ -42,7 +42,12 @@ static void free_object(Obj *object) {
   printf("%p free type %d\n", (void *)object, object->type);
 #endif /* ifdef DEBUG_LOG_GC */
   switch (object->type) {
+  case OBJ_BOUND_METHOD:
+    FREE(ObjBoundMethod, object);
+    break;
   case OBJ_CLASS: {
+    ObjClass *class = (ObjClass *)object;
+    free_table(&class->methods);
     FREE(ObjClass, object);
     break;
   }
@@ -123,9 +128,16 @@ static void blacken_object(Obj *object) {
 #endif /* ifdef DEBUG_LOG_GC */
 
   switch (object->type) {
+  case OBJ_BOUND_METHOD: {
+    ObjBoundMethod *bound = (ObjBoundMethod *)object;
+    mark_value(bound->reciever);
+    mark_object((Obj *)bound->method);
+    break;
+  }
   case OBJ_CLASS: {
     ObjClass *class = (ObjClass *)object;
     mark_object((Obj *)class->name);
+    mark_table(&class->methods);
     break;
   }
   case OBJ_CLOSURE: {
