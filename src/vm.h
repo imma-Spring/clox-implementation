@@ -4,6 +4,7 @@
 #include "common.h"
 #include "object.h"
 #include "table.h"
+#include "value.h"
 #include <stdint.h>
 
 #define FRAMES_MAX 64
@@ -22,6 +23,7 @@ typedef struct VM {
   Value *stack_top;
   Table globals;
   Table strings;
+  ObjString *init_string;
   ObjUpvalue *open_upvalues;
   size_t bytes_allocated;
   size_t next_gc;
