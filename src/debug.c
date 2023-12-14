@@ -41,6 +41,16 @@ static size_t constant_instruction(const char *name, Chunk *chunk,
   return offset + 2;
 }
 
+static size_t invoke_instruction(const char *name, Chunk *chunk,
+                                 size_t offset) {
+  uint8_t constant = chunk->code[offset + 1];
+  uint8_t arg_count = chunk->code[offset + 2];
+  printf("%-16s (%d args) %d '", name, arg_count, constant);
+  print_value(chunk->constants.value[constant]);
+  printf("'\n");
+  return offset + 3;
+}
+
 size_t disassemble_instruction(Chunk *chunk, size_t offset) {
   printf("%04zu ", offset);
   if (offset > 0 && chunk->lines[offset] == chunk->lines[offset - 1]) {
@@ -121,6 +131,8 @@ size_t disassemble_instruction(Chunk *chunk, size_t offset) {
     }
     return offset;
   }
+  case OP_INVOKE:
+    return invoke_instruction("OP_INVOKE", chunk, offset);
   case OP_CLOSE_UPVALUE:
     return simple_instruction("OP_CLOSE_UPVALUE", offset);
   case OP_RETURN:
