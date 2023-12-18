@@ -5,7 +5,7 @@ find_program(CCACHE_PROGRAM ccache)
 if(CCACHE_PROGRAM)
   set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CCACHE_PROGRAM}")
 endif()
-
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pg")
 # Export compilation database in JSON format.
 set(CMAKE_EXPORT_COMPILE_COMMANDS on)
 
